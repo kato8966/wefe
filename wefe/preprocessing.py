@@ -200,10 +200,11 @@ def get_embeddings_from_set(
             preprocessed_word = preprocess_word(
                 word, options=preprocessor, vocab_prefix=model.vocab_prefix
             )
-            embedding = model[preprocessed_word]
+            embeddings = [model[token] for token in preprocessed_word.split()]
 
-            if embedding is not None:
-                selected_embeddings[preprocessed_word] = embedding
+            if all(embedding is not None for embedding in embeddings):
+                selected_embeddings[preprocessed_word] = np.mean(embeddings, 0,
+                                                                 dtype=np.float64)
 
                 # if the selected strategy is first, then it stops on the first
                 # word encountered.
