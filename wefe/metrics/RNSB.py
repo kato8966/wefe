@@ -167,7 +167,7 @@ class RNSB(BaseMetric):
             num_train_positive_examples = np.count_nonzero((y_train == 1))
 
             # Check the number of train and test examples.
-            if num_train_positive_examples == 1:
+            if num_train_positive_examples < 1:
                 raise Exception(
                     "After splitting the dataset using train_test_split "
                     "(with test_size=0.1), the first attribute remained with 0 "
