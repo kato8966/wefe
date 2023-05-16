@@ -314,7 +314,7 @@ class RNSB(BaseMetric):
 
         estimator : BaseEstimator
             A scikit-learn classifier class that implements predict_proba function,
-            by default None,
+            by default LogisticRegression.
 
         estimator_params : dict
             Parameters that will use the classifier, by default { 'solver': 'liblinear',
