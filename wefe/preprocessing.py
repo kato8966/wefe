@@ -200,10 +200,11 @@ def get_embeddings_from_set(
             preprocessed_word = preprocess_word(
                 word, options=preprocessor, vocab_prefix=model.vocab_prefix
             )
-            embedding = model[preprocessed_word]
+            embeddings = [model[token] for token in preprocessed_word.split()]
 
-            if embedding is not None:
-                selected_embeddings[preprocessed_word] = embedding
+            if all(embedding is not None for embedding in embeddings):
+                selected_embeddings[preprocessed_word] = np.mean(embeddings, 0,
+                                                                 dtype=np.float64)
 
                 # if the selected strategy is first, then it stops on the first
                 # word encountered.
@@ -269,7 +270,7 @@ def _check_lost_vocabulary_threshold(
     percentage_of_lost_words = number_of_lost_words / len(word_set)
 
     # if the percentage of filtered words are greater than the
-    # threshold, log and return False
+    # threshold, log and return True
     if percentage_of_lost_words > lost_vocabulary_threshold:
         logging.warning(
             "The transformation of '{}' into {} embeddings lost proportionally more "
@@ -610,7 +611,7 @@ def get_embeddings_from_query(
         attribute_embeddings[attribute_set_name] = obtained_embeddings
 
     # check if some set has fewer words than the threshold. if that's
-    #  the case, return None
+    # the case, return None
     if some_set_lost_more_words_than_threshold:
         logging.error(
             "At least one set of '{}' query has proportionally fewer embeddings "

@@ -54,14 +54,14 @@ class BaseMetric(ABC):
             if the metric require different number of attribute sets than
             the delivered query
         """
-        # check if the query passed is a instance of Query
+        # check if the query passed is an instance of Query
         if not isinstance(query, Query):
             raise TypeError("query should be a Query instance, got {}".format(query))
 
-        # check if the word_embedding is a instance of
+        # check if the model passed is an instance of WordEmbeddingModel
         if not isinstance(model, WordEmbeddingModel):
             raise TypeError(
-                "word_embedding should be a WordEmbeddingModel instance, "
+                "model should be a WordEmbeddingModel instance, "
                 "got: {}".format(model)
             )
 

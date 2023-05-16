@@ -167,17 +167,17 @@ class RNSB(BaseMetric):
             num_train_positive_examples = np.count_nonzero((y_train == 1))
 
             # Check the number of train and test examples.
-            if num_train_positive_examples == 1:
+            if num_train_positive_examples < 1:
                 raise Exception(
                     "After splitting the dataset using train_test_split "
-                    "(with test_size=0.1), the first attribute remained with 0 "
+                    "(with test_size=0.2), the first attribute remained with 0 "
                     "training examples."
                 )
 
             if num_train_negative_examples < 1:
                 raise Exception(
                     "After splitting the dataset using train_test_split "
-                    "(with test_size=0.1), the second attribute remained with 0 "
+                    "(with test_size=0.2), the second attribute remained with 0 "
                     "training examples."
                 )
 
@@ -314,7 +314,7 @@ class RNSB(BaseMetric):
 
         estimator : BaseEstimator
             A scikit-learn classifier class that implements predict_proba function,
-            by default None,
+            by default LogisticRegression.
 
         estimator_params : dict
             Parameters that will use the classifier, by default { 'solver': 'liblinear',
