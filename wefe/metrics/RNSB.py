@@ -170,14 +170,14 @@ class RNSB(BaseMetric):
             if num_train_positive_examples < 1:
                 raise Exception(
                     "After splitting the dataset using train_test_split "
-                    "(with test_size=0.1), the first attribute remained with 0 "
+                    "(with test_size=0.2), the first attribute remained with 0 "
                     "training examples."
                 )
 
             if num_train_negative_examples < 1:
                 raise Exception(
                     "After splitting the dataset using train_test_split "
-                    "(with test_size=0.1), the second attribute remained with 0 "
+                    "(with test_size=0.2), the second attribute remained with 0 "
                     "training examples."
                 )
 
