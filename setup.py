@@ -13,10 +13,10 @@ with codecs.open("README.rst", encoding="utf-8-sig") as f:
     LONG_DESCRIPTION = f.read()
 AUTHOR = "WEFE Team"
 MAINTAINER = "WEFE Team"
-MAINTAINER_EMAIL = "pablo.badilla@ug.uchile.cl"
-URL = "https://github.com/dccuchile/wefe"
+MAINTAINER_EMAIL = "kato_taisei@is.s.u-tokyo.ac.jp"
+URL = "https://github.com/kato8966/wefe"
 LICENSE = "new BSD"
-DOWNLOAD_URL = "https://github.com/dccuchile/wefe"
+DOWNLOAD_URL = "https://github.com/kato8966/wefe"
 VERSION = wefe.__version__
 INSTALL_REQUIRES = [
     "numpy",
