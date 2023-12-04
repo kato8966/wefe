@@ -1076,7 +1076,7 @@ class MyRNSB(BaseMetric):
         estimator: BaseEstimator = LogisticRegression,
         estimator_params: Dict[str, Any] = {"solver": "liblinear", "max_iter": 10000},
         n_iterations: int = 1,
-        random_state: Union[int, None] = None,
+        random_states: List[int] = [0],
         holdout: bool = True,
         print_model_evaluation: bool = False,
         lost_vocabulary_threshold: float = 0.2,
@@ -1123,12 +1123,9 @@ class MyRNSB(BaseMetric):
             would always produce the same results,
             by default 1.
 
-        random_state : Union[int, None], optional
-            Seed that allows making the execution of the query reproducible.
-            Warning: if a random_state other than None is provided along with
-            n_iterations, each iteration will split the dataset and train a
-            classifier associated to the same seed, so the results of each iteration
-            will always be the same, by default None.
+        random_states : List[int], optional
+            Seeds that allow making the execution of the query reproducible, by default
+            [0].
 
         holdout: bool, optional
             True indicates that a holdout (split attributes in train/test sets) will
@@ -1198,11 +1195,7 @@ class MyRNSB(BaseMetric):
         # check the types of the provided arguments (only the defaults).
         self._check_input(query, model, locals())
 
-        if n_iterations > 1 and random_state is not None:
-            raise ValueError(
-                "It is not possible to specify random_state together with n_iterations"
-                " > 1 since all iterations would produce the same results."
-            )
+        assert len(random_states) == n_iterations
 
         # transform query word sets into embeddings
         embeddings = get_embeddings_from_query(
@@ -1222,8 +1215,7 @@ class MyRNSB(BaseMetric):
                 "query_name": query.query_name,
                 "result": np.nan,
                 "rnsb": np.nan,
-                "negative_sentiment_probabilities": {},
-                "negative_sentiment_distribution": {},
+                "std": np.nan,
             }
 
         # get the targets and attribute sets transformed into embeddings.
@@ -1250,7 +1242,7 @@ class MyRNSB(BaseMetric):
                 # train the logit with the train data.
                 trained_classifier, score = self._train_classifier(
                     attribute_embeddings_dict=attribute_embeddings,
-                    random_state=random_state,
+                    random_state=random_states[i],
                     estimator=estimator,
                     estimator_params=estimator_params,
                     holdout=holdout,
@@ -1268,8 +1260,10 @@ class MyRNSB(BaseMetric):
 
         # aggregate results
         rnsb = np.mean(calculated_rnsb)
+        std = np.std(calculated_rnsb, ddof=1)
         return {
             "query_name": query.query_name,
             "result": rnsb,
             "rnsb": rnsb,
+            "std": std,
         }
