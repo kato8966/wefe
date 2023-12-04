@@ -885,3 +885,391 @@ class RNSB(BaseMetric):
             "negative_sentiment_probabilities": negative_sentiment_probabilities,
             "negative_sentiment_distribution": negative_sentiment_distribution,
         }
+
+
+class MyRNSB(BaseMetric):
+    r"""Relative Negative Sentiment Bias (RNSB).
+
+    The metric was originally proposed in "A transparent framework for evaluating
+    unintended demographic bias in word embeddings" [1].
+
+    References
+    ----------
+    | [1]: Chris Sweeney and Maryam Najafian. A transparent framework for evaluating
+           unintended demographic bias in word embeddings.
+    |      In Proceedings of the 57th Annual Meeting of the Association for
+           Computational Linguistics, pages 1662–1667, 2019.
+    | [2]: https://github.com/ChristopherSweeney/AIFairness/blob/master/python_notebooks/Measuring_and_Mitigating_Word_Embedding_Bias.ipynb
+
+    """  # noqa: E501
+
+    metric_template = (2, 2)
+    metric_name = "Relative Negative Sentiment Bias"
+    metric_short_name = "RNSB"
+
+    def _train_classifier(
+        self,
+        attribute_embeddings_dict: List[Dict[str, np.ndarray]],
+        estimator: BaseEstimator,
+        estimator_params: Dict[str, Any],
+        random_state: Union[int, None],
+        holdout: bool,
+        print_model_evaluation: bool,
+    ) -> Tuple[BaseEstimator, float]:
+        """Train the sentiment classifier from the provided attribute embeddings.
+
+        Parameters
+        ----------
+        attribute_embeddings_dict : dict[str, np.ndarray]
+            A dict with the attributes keys and embeddings
+
+        estimator : BaseEstimator, optional
+            A scikit-learn classifier class that implements predict_proba function,
+            by default LogisticRegression,
+
+        estimator_params : dict, optional
+            Parameters that will use the classifier, by default { 'max_iter': 10000, }
+
+        random_state : Union[int, None], optional
+            A seed that allows making the execution of the query reproducible, by
+            default None
+
+        holdout: bool, optional
+            True indicates that a holdout (split attributes in train/test sets) will
+            be executed before running the model training.
+            This option allows for evaluating the performance of the classifier
+            (can be printed using print_model_evaluation=True) at the cost of training
+            the classifier with fewer examples. False disables this functionality.
+            Note that holdout divides into 80% train and 20% test, performs a shuffle
+            and tries to maintain the original ratio of the classes via stratify param,
+            by default True.
+
+        print_model_evaluation : bool, optional
+            Indicates whether the classifier evaluation is printed after the
+            training process is completed, by default False
+
+        Returns
+        -------
+        Tuple[BaseEstimator, float]
+            The trained classifier and the accuracy obtained by the model.
+        """
+        # when random_state is not none, set it on classifier params.
+        if random_state is not None:
+            estimator_params["random_state"] = random_state
+
+        # the attribute 0 words are treated as positive words.
+        positive_embeddings = np.array(list(attribute_embeddings_dict[0].values()))
+        # the attribute 1 words are treated as negative words.
+        negative_embeddings = np.array(list(attribute_embeddings_dict[1].values()))
+
+        # generate the labels (1, -1) for each embedding
+        positive_labels = np.ones(positive_embeddings.shape[0])
+        negative_labels = -np.ones(negative_embeddings.shape[0])
+
+        attributes_embeddings = np.concatenate(
+            (positive_embeddings, negative_embeddings)
+        )
+        attributes_labels = np.concatenate((positive_labels, negative_labels))
+
+        if holdout:
+            split = train_test_split(
+                attributes_embeddings,
+                attributes_labels,
+                shuffle=True,
+                random_state=random_state,
+                test_size=0.2,
+                stratify=attributes_labels,
+            )
+            X_embeddings_train, X_embeddings_test, y_train, y_test = split
+
+            num_train_negative_examples = np.count_nonzero((y_train == -1))
+            num_train_positive_examples = np.count_nonzero((y_train == 1))
+
+            # Check the number of train and test examples.
+            if num_train_positive_examples < 1:
+                raise Exception(
+                    "After splitting the dataset using train_test_split "
+                    "(with test_size=0.2), the first attribute remained with 0 "
+                    "training examples."
+                )
+
+            if num_train_negative_examples < 1:
+                raise Exception(
+                    "After splitting the dataset using train_test_split "
+                    "(with test_size=0.2), the second attribute remained with 0 "
+                    "training examples."
+                )
+
+            estimator = estimator(**estimator_params)
+            estimator.fit(X_embeddings_train, y_train)
+
+            # evaluate
+            y_pred = estimator.predict(X_embeddings_test)
+            score = estimator.score(X_embeddings_test, y_test)
+
+            if print_model_evaluation:
+                print(
+                    "Classification Report:\n{}".format(
+                        classification_report(y_test, y_pred, labels=estimator.classes_)
+                    )
+                )
+        else:
+            estimator = estimator(**estimator_params)
+            estimator.fit(attributes_embeddings, attributes_labels)
+            score = estimator.score(attributes_embeddings, attributes_labels)
+            if print_model_evaluation:
+                print("Holdout is disabled. No evaluation was performed.")
+
+        return estimator, score
+
+    def _calc_rnsb(
+        self,
+        target_embeddings_dict: List[Dict[str, np.ndarray]],
+        classifier: BaseEstimator,
+    ) -> np.float_:
+        """Calculate the RNSB metric.
+
+        Parameters
+        ----------
+        target_embeddings_dict : Dict[str, np.ndarray]
+            dict with the target words and their embeddings.
+        classifier : BaseEstimator
+            Trained scikit-learn classifier in the previous step.
+
+        Returns
+        -------
+        np.float_
+            return the RNSB score
+        """
+        # join the embeddings and the word sets in their respective arrays
+        target_embeddings_sets = [
+            list(target_dict.values()) for target_dict in target_embeddings_dict
+        ]
+
+        # get the probabilities associated with each target word vector
+        probabilities = [
+            classifier.predict_proba(target_embeddings)
+            for target_embeddings in target_embeddings_sets
+        ]
+        # row where the negative probabilities are located
+        negative_class_clf_row = np.where(classifier.classes_ == -1)[0][0]
+
+        # extract only the negative sentiment probability for each word
+        negative_probabilities = np.array([
+            np.mean(probability[:, negative_class_clf_row])
+            for probability in probabilities
+        ])
+
+        # normalization of the probabilities
+        normalized_negative_probabilities = (
+            negative_probabilities / np.sum(negative_probabilities)
+        )
+
+        return (
+            normalized_negative_probabilities[1] - normalized_negative_probabilities[0]
+        )
+
+    def run_query(
+        self,
+        query: Query,
+        model: WordEmbeddingModel,
+        estimator: BaseEstimator = LogisticRegression,
+        estimator_params: Dict[str, Any] = {"solver": "liblinear", "max_iter": 10000},
+        n_iterations: int = 1,
+        random_state: Union[int, None] = None,
+        holdout: bool = True,
+        print_model_evaluation: bool = False,
+        lost_vocabulary_threshold: float = 0.2,
+        preprocessors: List[Dict[str, Union[str, bool, Callable]]] = [{}],
+        strategy: str = "first",
+        normalize: bool = False,
+        warn_not_found_words: bool = False,
+        *args: Any,
+        **kwargs: Any
+    ) -> Dict[str, Any]:
+        """Calculate the RNSB metric over the provided parameters.
+
+        Note if you want to use with Bing Liu dataset, you have to pass
+        the positive and negative words in the first and second place of
+        attribute set array respectively.
+        Scores on this metric vary with each run due to different instances
+        of classifier training. For this reason, the robustness of these scores
+        can be improved by repeating the test several times and returning the
+        average of the scores obtained. This can be indicated in the
+        n_iterations parameter.
+
+        Parameters
+        ----------
+        query : Query
+            A Query object that contains the target and attribute word sets to
+            be tested.
+
+        model : WordEmbeddingModel
+            A word embedding model.
+
+        estimator : BaseEstimator
+            A scikit-learn classifier class that implements predict_proba function,
+            by default LogisticRegression.
+
+        estimator_params : dict
+            Parameters that will use the classifier, by default { 'solver': 'liblinear',
+            'max_iter': 10000, }
+
+        n_iterations : int, optional
+            When provided, it tells the metric to run the specified number of times
+            and then average its results. This functionality is indicated to
+            strengthen the results obtained.
+            Note that you cannot specify random_state next to n_iterations as this
+            would always produce the same results,
+            by default 1.
+
+        random_state : Union[int, None], optional
+            Seed that allows making the execution of the query reproducible.
+            Warning: if a random_state other than None is provided along with
+            n_iterations, each iteration will split the dataset and train a
+            classifier associated to the same seed, so the results of each iteration
+            will always be the same, by default None.
+
+        holdout: bool, optional
+            True indicates that a holdout (split attributes in train/test sets) will
+            be executed before running the model training.
+            This option allows for evaluating the performance of the classifier
+            (can be printed using print_model_evaluation=True) at the cost of training
+            the classifier with fewer examples. False disables this functionality.
+            Note that holdout divides into 80% train and 20% test, performs a shuffle
+            and tries to maintain the original ratio of the classes via stratify param,
+            by default True.
+
+        print_model_evaluation : bool, optional
+            Indicates whether the classifier evaluation is printed after the
+            training process is completed, by default False
+
+        preprocessors : List[Dict[str, Union[str, bool, Callable]]]
+            A list with preprocessor options.
+
+            A ``preprocessor`` is a dictionary that specifies what processing(s) are
+            performed on each word before it is looked up in the model vocabulary.
+            For example, the ``preprocessor``
+            ``{'lowecase': True, 'strip_accents': True}`` allows you to lowercase
+            and remove the accent from each word before searching for them in the
+            model vocabulary. Note that an empty dictionary ``{}`` indicates that no
+            preprocessing is done.
+
+            The possible options for a preprocessor are:
+
+            *   ``lowercase``: ``bool``. Indicates that the words are transformed to
+                lowercase.
+            *   ``uppercase``: ``bool``. Indicates that the words are transformed to
+                uppercase.
+            *   ``titlecase``: ``bool``. Indicates that the words are transformed to
+                titlecase.
+            *   ``strip_accents``: ``bool``, ``{'ascii', 'unicode'}``: Specifies that
+                the accents of the words are eliminated. The stripping type can be
+                specified. True uses 'unicode' by default.
+            *   ``preprocessor``: ``Callable``. It receives a function that operates
+                on each word. In the case of specifying a function, it overrides the
+                default preprocessor (i.e., the previous options stop working).
+
+            A list of preprocessor options allows you to search for several
+            variants of the words into the model. For example, the preprocessors
+            ``[{}, {"lowercase": True, "strip_accents": True}]``
+            ``{}`` allows searching first for the original words in the vocabulary of
+            the model. In case some of them are not found,
+            ``{"lowercase": True, "strip_accents": True}`` is executed on these words
+            and then they are searched in the model vocabulary.
+
+        strategy : str, optional
+            The strategy indicates how it will use the preprocessed words: 'first' will
+            include only the first transformed word found. 'all' will include all
+            transformed words found, by default "first".
+
+        normalize : bool, optional
+            True indicates that embeddings will be normalized, by default False
+
+        warn_not_found_words : bool, optional
+            Specifies if the function will warn (in the logger)
+            the words that were not found in the model's vocabulary, by default False.
+
+        Returns
+        -------
+        Dict[str, Any]
+            A dictionary with the query name and the calculated RNSB score.
+        """
+        # check the types of the provided arguments (only the defaults).
+        self._check_input(query, model, locals())
+
+        if n_iterations > 1 and random_state is not None:
+            raise ValueError(
+                "It is not possible to specify random_state together with n_iterations"
+                " > 1 since all iterations would produce the same results."
+            )
+
+        # transform query word sets into embeddings
+        embeddings = get_embeddings_from_query(
+            model=model,
+            query=query,
+            lost_vocabulary_threshold=lost_vocabulary_threshold,
+            preprocessors=preprocessors,
+            strategy=strategy,
+            normalize=normalize,
+            warn_not_found_words=warn_not_found_words,
+        )
+
+        # if there is any/some set has less words than the allowed limit,
+        # return the default value (nan)
+        if embeddings is None:
+            return {
+                "query_name": query.query_name,
+                "result": np.nan,
+                "rnsb": np.nan,
+                "negative_sentiment_probabilities": {},
+                "negative_sentiment_distribution": {},
+            }
+
+        # get the targets and attribute sets transformed into embeddings.
+        target_sets, attribute_sets = embeddings
+
+        # get only the embeddings of the sets.
+        target_embeddings = list(target_sets.values())
+        attribute_embeddings = list(attribute_sets.values())
+
+        # create the arrays that will contain the scores for each iteration
+        calculated_rnsb = []
+        scores = []
+
+        # calculate the scores for each iteration
+        for i in range(n_iterations):
+            try:
+
+                if print_model_evaluation and (i > 0 and i < 2):
+                    print(
+                        "When n_iterations > 1, only the first evaluation is printed."
+                    )
+                    print_model_evaluation = False
+
+                # train the logit with the train data.
+                trained_classifier, score = self._train_classifier(
+                    attribute_embeddings_dict=attribute_embeddings,
+                    random_state=random_state,
+                    estimator=estimator,
+                    estimator_params=estimator_params,
+                    holdout=holdout,
+                    print_model_evaluation=print_model_evaluation,
+                )
+
+                scores.append(score)
+
+                # get the scores
+                rnsb = self._calc_rnsb(target_embeddings, trained_classifier)
+
+                calculated_rnsb.append(rnsb)
+            except Exception as e:
+                logging.exception("RNSB Iteration omitted: " + str(e))
+
+        # aggregate results
+        rnsb = np.mean(calculated_rnsb)
+        return {
+            "query_name": query.query_name,
+            "result": rnsb,
+            "rnsb": rnsb,
+        }
